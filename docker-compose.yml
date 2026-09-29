@@ -1,0 +1,55 @@
+name: sub1s
+
+services:
+  valkey:
+    image: valkey/valkey:7.2-alpine
+    container_name: sub1s-valkey
+    restart: always
+    command: valkey-server --maxmemory 100mb --maxmemory-policy allkeys-lru --save ""
+    ports:
+      - "${VALKEY_PORT:-6379}:6379"
+    volumes:
+      - valkey_data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: '0.15'
+          memory: 150M
+        reservations:
+          memory: 50M
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: sub1s-postgres
+    restart: always
+    command: postgres -c shared_buffers=256MB
+    environment:
+      POSTGRES_DB: sub1s_db
+      POSTGRES_USER: sub1s_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required (see .env.example)}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sub1s_user -d sub1s_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: '0.35'
+          memory: 1536M
+        reservations:
+          memory: 512M
+
+volumes:
+  pg_data:
+  valkey_data:
