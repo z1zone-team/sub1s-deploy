@@ -53,15 +53,16 @@ jobs:
             sudo docker compose up -d --force-recreate nginx
 
             # 5. 로컬 헬스체크 확인
-            for i in $(seq 1 15); do
-              if curl -sf http://127.0.0.1:3000/api/health; then
+            for i in $(seq 1 20); do
+              if curl -sf http://127.0.0.1/api/health || sudo docker compose exec -T server node -e "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" > /dev/null 2>&1; then
                 echo "✅ Sub1S 서비스 배포 헬스체크 성공"
                 exit 0
               fi
-              echo "배포 기동 대기 중... ($i/15)"
+              echo "배포 기동 대기 중... ($i/20)"
               sleep 4
             done
             echo "❌ 헬스체크 타임아웃"
+            sudo docker compose logs --tail 50 server nginx
             exit 1
 
       - name: Prune dangling images
