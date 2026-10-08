@@ -27,6 +27,7 @@ fi
 
 echo "=== 1. Nginx 설정 파일 내 도메인 교체 ==="
 sed -i "s|sub1s.domain.com|$DOMAIN|g" ./nginx/default.conf
+sed -i "s|sub1s.devnoco.com|$DOMAIN|g" ./nginx/default.conf
 
 echo "=== 2. HTTP 전용 모드로 Nginx 기동 (부트스트랩) ==="
 NGINX_CONF=default.http-only.conf $DOCKER_COMPOSE up -d nginx
