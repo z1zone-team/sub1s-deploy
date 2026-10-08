@@ -49,12 +49,13 @@ jobs:
             sudo docker compose pull
             sudo docker compose up -d
 
-            # 4. Nginx 설정 반영 (바인드 마운트 inode 갱신)
+            # 4. Nginx 설정 반영 (바인드 마운트 inode 갱신 및 업스트림 리로드)
             sudo docker compose up -d --force-recreate nginx
+            sudo docker compose exec -T nginx nginx -s reload || true
 
-            # 5. 로컬 헬스체크 확인
+            # 5. 로컬 헬스체크 확인 (HTTPS, HTTP, Node 컨테이너 직접 검증)
             for i in $(seq 1 20); do
-              if curl -sf http://127.0.0.1/api/health || sudo docker compose exec -T server node -e "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" > /dev/null 2>&1; then
+              if curl -sfk https://127.0.0.1/api/health -H "Host: sub1s.devnoco.com" > /dev/null 2>&1 || curl -sf http://127.0.0.1/api/health > /dev/null 2>&1 || sudo docker compose exec -T server node -e "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" > /dev/null 2>&1; then
                 echo "✅ Sub1S 서비스 배포 헬스체크 성공"
                 exit 0
               fi

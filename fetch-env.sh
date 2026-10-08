@@ -46,6 +46,42 @@ else
 fi
 
 if [ -f .env ]; then
+  # ---------------------------------------------------------------------------
+  # SSL 인증서 발급 상태 검사 및 Nginx TLS 설정 자동 보존
+  # ---------------------------------------------------------------------------
+  if grep -q '^DOMAIN=' .env 2>/dev/null; then
+    CURRENT_DOMAIN=$(grep '^DOMAIN=' .env 2>/dev/null | cut -d '=' -f2 | tr -d ' "\r' || true)
+    if [ -z "$CURRENT_DOMAIN" ] || [ "$CURRENT_DOMAIN" = "sub1s.domain.com" ] || [ "$CURRENT_DOMAIN" = "api.sub1s.com" ]; then
+      CURRENT_DOMAIN="sub1s.devnoco.com"
+      sed -i "s|^DOMAIN=.*|DOMAIN=${CURRENT_DOMAIN}|" .env
+    fi
+  else
+    CURRENT_DOMAIN="sub1s.devnoco.com"
+    echo "DOMAIN=${CURRENT_DOMAIN}" >> .env
+  fi
+
+  CERT_EXISTS=false
+  CERT_MOUNT="/var/lib/docker/volumes/sub1s_certbot-conf/_data/live/${CURRENT_DOMAIN}/fullchain.pem"
+  if command -v sudo >/dev/null 2>&1 && sudo test -f "$CERT_MOUNT" 2>/dev/null; then
+    CERT_EXISTS=true
+  elif [ -f "$CERT_MOUNT" ]; then
+    CERT_EXISTS=true
+  fi
+
+  if [ "$CERT_EXISTS" = true ]; then
+    echo "fetch-env: 유효한 Let's Encrypt SSL 인증서가 확인되었습니다 (${CURRENT_DOMAIN})"
+    if grep -q '^NGINX_CONF=' .env 2>/dev/null; then
+      sed -i "s|^NGINX_CONF=.*|NGINX_CONF=default.conf|" .env
+    else
+      echo "NGINX_CONF=default.conf" >> .env
+    fi
+    if [ -f ./nginx/default.conf ]; then
+      sed -i "s|sub1s.domain.com|${CURRENT_DOMAIN}|g" ./nginx/default.conf
+    fi
+  else
+    echo "fetch-env: SSL 인증서 미발급 상태. 기존 NGINX_CONF 설정을 유지합니다."
+  fi
+
   echo "fetch-env: .env 준비 완료"
 else
   echo "⚠️ 경고: .env 파일이 없습니다. .env.example을 복사하여 환경변수를 설정해주세요."
