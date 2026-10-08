@@ -1,0 +1,77 @@
+name: Deploy to OCI ARM
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docker-compose.yml
+      - nginx/**
+      - setup-swap.sh
+      - fetch-env.sh
+      - init-letsencrypt.sh
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Copy deployment files to OCI ARM VM
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.OCI_SSH_HOST }}
+          username: ${{ secrets.OCI_SSH_USERNAME }}
+          key: ${{ secrets.OCI_SSH_KEY }}
+          port: ${{ secrets.OCI_SSH_PORT || 22 }}
+          source: docker-compose.yml,nginx,setup-swap.sh,fetch-env.sh,init-letsencrypt.sh,init-db.sql
+          target: ~/sub1s-deploy
+
+      - name: Execute deployment on OCI ARM VM
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.OCI_SSH_HOST }}
+          username: ${{ secrets.OCI_SSH_USERNAME }}
+          key: ${{ secrets.OCI_SSH_KEY }}
+          port: ${{ secrets.OCI_SSH_PORT || 22 }}
+          script: |
+            set -e
+            cd ~/sub1s-deploy
+            chmod +x setup-swap.sh fetch-env.sh init-letsencrypt.sh
+
+            # 1. 4GB 스왑 메모리 보장
+            ./setup-swap.sh 4G
+
+            # 2. OCI Object Storage로부터 시크릿 동기화
+            ./fetch-env.sh
+
+            # 3. 최신 컨테이너 이미지 풀 및 롤링 배포
+            sudo docker compose pull
+            sudo docker compose up -d
+
+            # 4. Nginx 설정 반영 (바인드 마운트 inode 갱신)
+            sudo docker compose up -d --force-recreate nginx
+
+            # 5. 로컬 헬스체크 확인
+            for i in $(seq 1 15); do
+              if curl -sf http://127.0.0.1:3000/api/health; then
+                echo "✅ Sub1S 서비스 배포 헬스체크 성공"
+                exit 0
+              fi
+              echo "배포 기동 대기 중... ($i/15)"
+              sleep 4
+            done
+            echo "❌ 헬스체크 타임아웃"
+            exit 1
+
+      - name: Prune dangling images
+        continue-on-error: true
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.OCI_SSH_HOST }}
+          username: ${{ secrets.OCI_SSH_USERNAME }}
+          key: ${{ secrets.OCI_SSH_KEY }}
+          port: ${{ secrets.OCI_SSH_PORT || 22 }}
+          script: |
+            sudo docker image prune -f
+            df -h /
