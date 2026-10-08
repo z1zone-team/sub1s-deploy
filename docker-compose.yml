@@ -1,39 +1,25 @@
 name: sub1s
 
-services:
-  valkey:
-    image: valkey/valkey:7.2-alpine
-    container_name: sub1s-valkey
-    restart: always
-    command: valkey-server --maxmemory 100mb --maxmemory-policy allkeys-lru --save ""
-    ports:
-      - "${VALKEY_PORT:-6379}:6379"
-    volumes:
-      - valkey_data:/data
-    healthcheck:
-      test: ["CMD", "valkey-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-    deploy:
-      resources:
-        limits:
-          cpus: '0.15'
-          memory: 150M
-        reservations:
-          memory: 50M
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
 
+services:
+  # 1. 메인 관계형 & 벡터 데이터베이스
   postgres:
     image: pgvector/pgvector:pg16
     container_name: sub1s-postgres
-    restart: always
+    restart: unless-stopped
+    logging: *default-logging
     command: postgres -c shared_buffers=256MB
     environment:
       POSTGRES_DB: sub1s_db
       POSTGRES_USER: sub1s_user
       POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required (see .env.example)}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
       - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
@@ -49,7 +35,175 @@ services:
           memory: 1536M
         reservations:
           memory: 512M
+    networks:
+      - sub1s-network
+
+  # 2. 인메모리 캐시 & BullMQ 큐 브로커
+  valkey:
+    image: valkey/valkey:7.2-alpine
+    container_name: sub1s-valkey
+    restart: unless-stopped
+    logging: *default-logging
+    # BullMQ 잡 유실 방지를 위한 noeviction 및 AOF 영속성 활성화
+    command: valkey-server --maxmemory 150mb --maxmemory-policy noeviction --appendonly yes
+    ports:
+      - "127.0.0.1:${VALKEY_PORT:-6379}:6379"
+    volumes:
+      - valkey_data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: '0.15'
+          memory: 200M
+        reservations:
+          memory: 50M
+    networks:
+      - sub1s-network
+
+  # 3. 코어 백엔드 API & 다익스트라 라우팅 엔진 & WebSocket 게이트웨이
+  server:
+    image: ${SERVER_IMAGE:-ghcr.io/z1zone-team/sub1s-server:latest}
+    container_name: sub1s-server
+    restart: unless-stopped
+    logging: *default-logging
+    command: ["node", "dist/main"]
+    environment:
+      NODE_ENV: production
+      NODE_OPTIONS: "--max-old-space-size=1024"
+      PORT: 3000
+      DATABASE_URL: postgresql://sub1s_user:${DB_PASSWORD}@postgres:5432/sub1s_db?schema=public
+      VALKEY_HOST: valkey
+      VALKEY_PORT: 6379
+      AI_SERVICE_URL: http://ai:8000
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY}
+      CLIENT_KEY: ${CLIENT_KEY}
+      MASTER_ENCRYPTION_KEY: ${MASTER_ENCRYPTION_KEY}
+      ROUTING_ENGINE: ${ROUTING_ENGINE:-DIJKSTRA}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    expose:
+      - "3000"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 1536M
+        reservations:
+          memory: 512M
+    networks:
+      - sub1s-network
+
+  # 4. AI 워커 서비스 (Faster-Whisper STT, Gemini NLU, Edge-TTS)
+  ai:
+    image: ${AI_IMAGE:-ghcr.io/z1zone-team/sub1s-ai:latest}
+    container_name: sub1s-ai
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      PORT: 8000
+      VALKEY_HOST: valkey
+      VALKEY_PORT: 6379
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      ENABLE_BULLMQ_WORKER: "true"
+      DEBUG: "false"
+    depends_on:
+      valkey:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    expose:
+      - "8000"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.80'
+          memory: 2048M
+        reservations:
+          memory: 1024M
+    networks:
+      - sub1s-network
+
+  # 5. Nginx 리버스 프록시, SSL 종단, WebSocket 및 Rate Limiting
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: sub1s-nginx
+    restart: unless-stopped
+    logging: *default-logging
+    # 6시간마다 SSL 인증서 갱신분을 자동으로 집어가도록 리로드 루프 구성
+    command:
+      - /bin/sh
+      - -c
+      - "while :; do sleep 6h & wait $${!}; nginx -s reload; done & nginx -g 'daemon off;'"
+    depends_on:
+      server:
+        condition: service_healthy
+    ulimits:
+      nofile:
+        soft: 16384
+        hard: 16384
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/${NGINX_CONF:-default.conf}:/etc/nginx/conf.d/default.conf:ro
+      - certbot-www:/var/www/certbot:ro
+      - certbot-conf:/etc/letsencrypt:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '0.10'
+          memory: 128M
+        reservations:
+          memory: 32M
+    networks:
+      - sub1s-network
+
+  # 6. Let's Encrypt 인증서 자동 갱신 데몬
+  certbot:
+    image: certbot/certbot:latest
+    container_name: sub1s-certbot
+    restart: unless-stopped
+    logging: *default-logging
+    volumes:
+      - certbot-www:/var/www/certbot
+      - certbot-conf:/etc/letsencrypt
+    # 12시간마다 인증서 갱신 체크
+    entrypoint: >
+      /bin/sh -c "trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;"
+    networks:
+      - sub1s-network
+
+networks:
+  sub1s-network:
+    driver: bridge
 
 volumes:
   pg_data:
   valkey_data:
+  certbot-www:
+  certbot-conf:
