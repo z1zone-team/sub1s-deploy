@@ -7,13 +7,13 @@ x-logging: &default-logging
     max-file: "3"
 
 services:
-  # 1. 메인 관계형 & 벡터 데이터베이스
+  # 1. 메인 관계형 & 벡터 데이터베이스 (768MB 상한 / 256MB 예약)
   postgres:
     image: pgvector/pgvector:pg16
     container_name: sub1s-postgres
     restart: unless-stopped
     logging: *default-logging
-    command: postgres -c shared_buffers=256MB
+    command: postgres -c shared_buffers=128MB
     environment:
       POSTGRES_DB: sub1s_db
       POSTGRES_USER: sub1s_user
@@ -31,21 +31,20 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.35'
-          memory: 1536M
+          cpus: '0.30'
+          memory: 768M
         reservations:
-          memory: 512M
+          memory: 256M
     networks:
       - sub1s-network
 
-  # 2. 인메모리 캐시 & BullMQ 큐 브로커
+  # 2. 인메모리 캐시 & BullMQ 큐 브로커 (128MB 상한 / 32MB 예약)
   valkey:
     image: valkey/valkey:7.2-alpine
     container_name: sub1s-valkey
     restart: unless-stopped
     logging: *default-logging
-    # BullMQ 잡 유실 방지를 위한 noeviction 및 AOF 영속성 활성화
-    command: valkey-server --maxmemory 150mb --maxmemory-policy noeviction --appendonly yes
+    command: valkey-server --maxmemory 80mb --maxmemory-policy noeviction --appendonly yes
     ports:
       - "127.0.0.1:${VALKEY_PORT:-6379}:6379"
     volumes:
@@ -58,14 +57,14 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.15'
-          memory: 200M
+          cpus: '0.10'
+          memory: 128M
         reservations:
-          memory: 50M
+          memory: 32M
     networks:
       - sub1s-network
 
-  # 3. 코어 백엔드 API & 다익스트라 라우팅 엔진 & WebSocket 게이트웨이
+  # 3. 코어 백엔드 API & 다익스트라 엔진 & WebSocket 게이트웨이 (768MB 상한 / 256MB 예약)
   server:
     image: ${SERVER_IMAGE:-ghcr.io/z1zone-team/sub1s-server:latest}
     container_name: sub1s-server
@@ -74,7 +73,7 @@ services:
     command: ["node", "dist/main"]
     environment:
       NODE_ENV: production
-      NODE_OPTIONS: "--max-old-space-size=1024"
+      NODE_OPTIONS: "--max-old-space-size=512"
       PORT: 3000
       DATABASE_URL: postgresql://sub1s_user:${DB_PASSWORD}@postgres:5432/sub1s_db?schema=public
       VALKEY_HOST: valkey
@@ -106,14 +105,14 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.50'
-          memory: 1536M
+          cpus: '0.40'
+          memory: 768M
         reservations:
-          memory: 512M
+          memory: 256M
     networks:
       - sub1s-network
 
-  # 4. AI 워커 서비스 (Faster-Whisper STT, Gemini NLU, Edge-TTS)
+  # 4. AI 워커 서비스 (Faster-Whisper int8, Gemini NLU, Edge-TTS) (1024MB 상한 / 512MB 예약)
   ai:
     image: ${AI_IMAGE:-ghcr.io/z1zone-team/sub1s-ai:latest}
     container_name: sub1s-ai
@@ -140,20 +139,19 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.80'
-          memory: 2048M
-        reservations:
+          cpus: '0.60'
           memory: 1024M
+        reservations:
+          memory: 512M
     networks:
       - sub1s-network
 
-  # 5. Nginx 리버스 프록시, SSL 종단, WebSocket 및 Rate Limiting
+  # 5. Nginx 리버스 프록시, SSL 종단, WebSocket 및 Rate Limiting (64MB 상한 / 16MB 예약)
   nginx:
     image: nginx:1.27-alpine
     container_name: sub1s-nginx
     restart: unless-stopped
     logging: *default-logging
-    # 6시간마다 SSL 인증서 갱신분을 자동으로 집어가도록 리로드 루프 구성
     command:
       - /bin/sh
       - -c
@@ -177,9 +175,9 @@ services:
       resources:
         limits:
           cpus: '0.10'
-          memory: 128M
+          memory: 64M
         reservations:
-          memory: 32M
+          memory: 16M
     networks:
       - sub1s-network
 
@@ -192,7 +190,6 @@ services:
     volumes:
       - certbot-www:/var/www/certbot
       - certbot-conf:/etc/letsencrypt
-    # 12시간마다 인증서 갱신 체크
     entrypoint: >
       /bin/sh -c "trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;"
     networks:
