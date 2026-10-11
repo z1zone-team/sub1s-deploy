@@ -117,7 +117,7 @@ curl -sf https://api.sub1s.com/api/health
 docker compose exec ai curl -sf http://localhost:8000/health
 
 # 3. WebSocket 실시간 WSS 핸드셰이크 점검
-curl -sfI https://api.sub1s.com/ws/subway
+curl -sf "https://api.sub1s.com/socket.io/?EIO=4&transport=polling"
 
 # 4. 실시간 컨테이너 리소스 점검 (메모리 누수 감시)
 docker stats
