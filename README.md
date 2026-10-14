@@ -122,3 +122,29 @@ curl -sf "https://api.sub1s.com/socket.io/?EIO=4&transport=polling"
 # 4. 실시간 컨테이너 리소스 점검 (메모리 누수 감시)
 docker stats
 ```
+
+## 8. Android 초대 링크 도메인 연결
+
+앱 PR [#148](https://github.com/z1zone-team/sub1s-app/pull/148)은 초대 링크를 `https://sub1s.devnoco.com/invite/:token`으로 만들고 Android intent filter를 설정한다. 이 저장소는 `https://sub1s.devnoco.com/.well-known/assetlinks.json`에서 해당 앱의 패키지명과 공개 서명 인증서 지문을 제공한다. 앱 설정과 웹 서버 연결 파일이 모두 적용되어야 Android가 도메인을 검증할 수 있다.
+
+현재 등록한 앱은 **개발 빌드 `com.z1zone.sub1s.local`만**이다(사용자 결정). `app-debug.apk`에서 `apksigner verify --print-certs`로 확인한 SHA-256 인증서 지문을 사용한다. 다른 개발 키로 서명한 APK나 스토어용 `com.z1zone.sub1s`는 연결되지 않는다. 스토어용 연결은 실제 배포 서명 인증서가 정해지면 별도 항목을 추가한다. Google Play App Signing 사용 시 배포 앱의 서명 인증서 지문을 사용한다.
+
+파일은 `nginx/assetlinks.json`에 있으며 Nginx 컨테이너에 읽기 전용 마운트한다. 기존 OCI 배포 workflow가 `nginx/`를 복사하고 Nginx 컨테이너를 다시 생성하므로 이 파일도 함께 배포된다. 공개 인증서 지문에는 비밀키가 포함되지 않는다. iOS는 이번 작업에서 보류한다.
+
+### 배포 및 실기기 확인
+
+1. 앱 PR #148과 이 배포 변경을 머지한다(사용자가 진행). deploy main 변경은 기존 OCI workflow로 자동 배포된다.
+2. 연결 파일을 조회해 HTTP 200, `Content-Type: application/json`, JSON 본문을 확인한다. HTTPS 연결 파일은 다른 주소로 리다이렉트하면 안 된다.
+3. 앱 설정이 포함되도록 Android 개발 앱을 재빌드해 설치한다. Metro 새로고침만으로 네이티브 intent filter가 바뀌지는 않는다.
+4. Android 12 이상에서 도메인 검증 상태를 확인하고 실제로 공유한 초대 링크를 누른다.
+
+```bash
+curl -i https://sub1s.devnoco.com/.well-known/assetlinks.json
+adb shell pm verify-app-links --re-verify com.z1zone.sub1s.local
+# 검증에 시간이 걸릴 수 있으므로 기다린 뒤 확인한다
+adb shell pm get-app-links com.z1zone.sub1s.local
+# <실제_초대_토큰>을 공유한 링크의 16자리 토큰으로 바꾼다
+adb shell am start -a android.intent.action.VIEW -c android.intent.category.BROWSABLE -d "https://sub1s.devnoco.com/invite/<실제_초대_토큰>"
+```
+
+참고: [Expo Android App Links](https://docs.expo.dev/linking/android-app-links/), [Android 링크 검증](https://developer.android.com/training/app-links/verify-android-applinks).
