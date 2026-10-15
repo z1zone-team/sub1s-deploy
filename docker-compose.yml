@@ -87,6 +87,8 @@ services:
       # sub1s.env(OCI 버킷)에 넣은 외부 서비스 키를 서버 컨테이너로 전달한다. 값이 없으면 빈 문자열이고 서버는 해당 기능만 끈다
       VWORLD_API_KEY: ${VWORLD_API_KEY:-}
       VWORLD_DAILY_LIMIT: ${VWORLD_DAILY_LIMIT:-}
+      VWORLD_PROXY_URL: ${VWORLD_PROXY_URL:-}
+      VWORLD_PROXY_SECRET: ${VWORLD_PROXY_SECRET:-}
       SEOUL_SUBWAY_REALTIME_API_KEY: ${SEOUL_SUBWAY_REALTIME_API_KEY:-}
       SEOUL_OPEN_API_KEY: ${SEOUL_OPEN_API_KEY:-}
       PUBLIC_DATA_API_KEY: ${PUBLIC_DATA_API_KEY:-}
