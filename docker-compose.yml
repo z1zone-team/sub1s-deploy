@@ -79,6 +79,8 @@ services:
       VALKEY_HOST: valkey
       VALKEY_PORT: 6379
       AI_SERVICE_URL: http://ai:8000
+      # 도보 구간을 실제 보행로로 구하는 OSRM 주소. 응답이 없으면 서버가 알아서 직선 추정으로 돌아간다
+      OSRM_URL: ${OSRM_URL:-http://osrm:5000}
       CLERK_SECRET_KEY: ${CLERK_SECRET_KEY}
       CLIENT_KEY: ${CLIENT_KEY}
       MASTER_3DES_KEY: ${MASTER_3DES_KEY:-${MASTER_ENCRYPTION_KEY}}
@@ -207,6 +209,37 @@ services:
     networks:
       - sub1s-network
 
+  # 7. 보행 경로 길찾기(OSRM, OSM 한국 데이터의 foot 프로필) (2560MB 상한 / 256MB 예약)
+  #    데이터는 `osrm/prepare.sh`로 한 번 만든다(README 참고). 데이터가 없으면 안내만 남기고 대기하며, 그동안 서버는 직선 추정을 쓴다.
+  #    이미지는 태그에 버전이 없어 다이제스트로 고정했고, 데이터를 만든 이미지와 같아야 한다(prepare.sh의 OSRM_IMAGE)
+  osrm:
+    image: ${OSRM_IMAGE:-ghcr.io/project-osrm/osrm-backend@sha256:55dbfd47d984c2cacd64e32901b4321c86b5ec761438e69aa053dc78698a786f}
+    container_name: sub1s-osrm
+    restart: unless-stopped
+    logging: *default-logging
+    command:
+      - /bin/sh
+      - -c
+      - |
+        if [ -f /data/south-korea.osrm.mldgr ]; then
+          exec osrm-routed --algorithm mld --max-table-size 100 /data/south-korea.osrm
+        fi
+        echo "OSRM 보행 데이터가 없습니다. README의 'OSRM 보행 경로 데이터 준비'를 먼저 실행하세요"
+        sleep infinity
+    volumes:
+      - osrm_data:/data:ro
+    expose:
+      - "5000"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.30'
+          memory: 2560M
+        reservations:
+          memory: 256M
+    networks:
+      - sub1s-network
+
 networks:
   sub1s-network:
     driver: bridge
@@ -214,5 +247,6 @@ networks:
 volumes:
   pg_data:
   valkey_data:
+  osrm_data:
   certbot-www:
   certbot-conf:

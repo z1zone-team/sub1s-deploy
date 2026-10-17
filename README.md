@@ -148,3 +148,47 @@ adb shell am start -a android.intent.action.VIEW -c android.intent.category.BROW
 ```
 
 참고: [Expo Android App Links](https://docs.expo.dev/linking/android-app-links/), [Android 링크 검증](https://developer.android.com/training/app-links/verify-android-applinks).
+
+## 9. 보행 경로(OSRM) 데이터 준비
+
+서버가 걷는 구간을 실제 보행로로 구하도록(서버 이슈 #188 / PR #189) OSRM 컨테이너(`sub1s-osrm`)가 함께 뜬다.
+**데이터를 만들기 전에는 컨테이너가 안내 문구만 남기고 대기하고, 서버는 응답이 없으면 직선 추정(직선 거리 x 1.25)으로 돌아가므로** 데이터 준비 전에 배포해도 서비스에는 영향이 없다.
+
+### 처음 한 번 (그리고 데이터를 새로 받고 싶을 때)
+
+한국 OSM 데이터(약 290MB)를 받아 OSRM 보행(foot) 데이터로 만든다. 서버는 1코어라 몇십 분이 걸릴 수 있어 끊겨도 이어지도록 `nohup`으로 돌린다.
+처리 중에는 도커 컨테이너의 메모리(3GB)와 CPU(0.8코어)를 제한해 다른 서비스가 밀리지 않게 하고, 끝나면 `osrm` 컨테이너를 다시 띄운다.
+
+```bash
+cd ~/sub1s-deploy
+sudo nohup ./osrm/prepare.sh > osrm-prepare.log 2>&1 &
+tail -f osrm-prepare.log        # 진행 확인. "완료"가 나오면 끝
+```
+
+만들어진 데이터는 도커 볼륨 `sub1s_osrm_data`에 약 3GB로 남는다(디스크 여유 10GB 이상 필요). 처리 중에는 `osrm` 컨테이너를 잠시 멈추므로 그동안 서버는 직선 추정을 쓴다.
+데이터는 Geofabrik이 매일 갱신하지만 자주 바꿀 필요는 없다. 지도가 오래됐다고 느껴질 때(예: 분기마다) 같은 명령을 다시 실행한다.
+
+### 확인
+
+```bash
+# 1. 컨테이너가 데이터를 읽어 떠 있는지 (대기 문구가 아니라 실행 로그가 보여야 한다)
+sudo docker compose logs --tail 5 osrm
+
+# 2. 서버 컨테이너에서 OSRM 호출 (경기광주 부근 약 1.3km 보행 경로, "code":"Ok"가 나와야 한다)
+sudo docker compose exec -T server node -e "fetch('http://osrm:5000/route/v1/foot/127.2528,37.409;127.25263,37.399907?overview=false').then(r=>r.text()).then(console.log)"
+
+# 3. 메모리 (osrm이 2GB 안팎)
+sudo docker stats --no-stream
+```
+
+앱에서는 좌표로 경로를 검색했을 때 도보 구간 점선이 직선이 아니라 길을 따라가고, 응답의 `walkDistanceSource`가 `ROUTED`(환승 걷기가 없을 때)가 된다.
+
+### 끄기
+
+`sudo docker compose stop osrm`으로 멈추면 서버가 알아서(첫 실패 뒤 30초 동안 호출을 건너뛰며) 직선 추정으로 돌아간다. 다시 켜려면 `sudo docker compose up -d osrm`.
+
+### 참고
+
+- 이미지는 태그에 버전이 없어 다이제스트로 고정했다(`docker-compose.yml`과 `osrm/prepare.sh`의 `OSRM_IMAGE`). 다른 버전으로 올릴 때는 **둘을 같이 바꾸고 데이터를 다시 만들어야** 한다(엔진 버전이 다르면 만든 데이터를 읽지 못할 수 있다)
+- OSM 데이터는 ODbL이라 출처 표기가 필요하다(앱에 "© OpenStreetMap contributors" 표기를 넣는 일은 앱 쪽 과제)
+- 서버 사양(ARM, 1코어, 메모리 5.8GiB)에서 `osrm`의 메모리 상한은 2.5GB다. 음성 인식 등 다른 컨테이너와 함께 쓸 때 메모리가 부족하면 `docker stats`로 확인하고 상한을 조정한다
