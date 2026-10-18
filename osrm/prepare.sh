@@ -3,7 +3,8 @@
 # 운영 서버에서 처음 한 번, 그리고 데이터를 새로 받고 싶을 때 실행한다(README 9장). 도커 권한이 필요해 sudo로 실행한다.
 #   sudo nohup ./osrm/prepare.sh > osrm-prepare.log 2>&1 &
 #
-# 서버는 1코어라 처리에 몇십 분이 걸릴 수 있다. 처리 컨테이너는 메모리와 CPU를 제한해 다른 서비스가 밀리지 않게 한다.
+# 서버는 1코어라 처리에 20분 남짓 걸린다(실측 22분). 처리 컨테이너는 메모리와 CPU를 제한해 다른 서비스가 밀리지 않게 한다.
+# 처리 중에는 서버 메모리가 거의 차서 다른 컨테이너의 메모리가 스왑으로 밀릴 수 있으니 한가한 시간에 실행한다.
 # OSRM 이미지는 다운로드 도구가 없어 받기는 curl 이미지로 따로 하고, 처리는 OSRM 이미지로 한다.
 set -euo pipefail
 
@@ -11,7 +12,9 @@ set -euo pipefail
 IMAGE="${OSRM_IMAGE:-ghcr.io/project-osrm/osrm-backend@sha256:55dbfd47d984c2cacd64e32901b4321c86b5ec761438e69aa053dc78698a786f}"
 VOLUME="${OSRM_VOLUME:-sub1s_osrm_data}"
 PBF_URL="${OSRM_PBF_URL:-https://download.geofabrik.de/asia/south-korea-latest.osm.pbf}"
-MEMORY="${OSRM_PREPARE_MEMORY:-3g}"
+# 한국 전체 추출(extract)은 메모리를 3GB 넘게 쓴다(3g로 돌리면 마지막 단계에서 강제 종료됨, 4g에서 끝까지 처리됨).
+# 도커 컨테이너에는 스왑이 쓰이지 않아 상한을 넘으면 그대로 죽는다
+MEMORY="${OSRM_PREPARE_MEMORY:-4g}"
 CPUS="${OSRM_PREPARE_CPUS:-0.8}"
 MIN_FREE_GB="${OSRM_MIN_FREE_GB:-10}"
 NAME="south-korea"
