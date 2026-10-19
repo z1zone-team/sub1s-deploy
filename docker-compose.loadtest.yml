@@ -1,0 +1,28 @@
+# 부하 테스트 모드 오버라이드. 기본 docker-compose.yml 위에 얹어서만 쓴다(loadtest.sh on).
+#   docker compose -f docker-compose.yml -f docker-compose.loadtest.yml up -d --no-deps --force-recreate server nginx
+# 이 파일은 docker-compose.override.yml이 아니므로 자동으로 읽히지 않는다.
+# 배포 워크플로는 기본 파일만으로 up -d를 하므로 다음 배포가 돌면 테스트 모드는 꺼진다.
+#
+# 목적: 테스트 동안 외부 API(서울시, 공공데이터, V-World, 푸시)를 부르지 않고 한도를 쓰지 않게 하고,
+# nginx의 IP당 속도 제한 때문에 서버의 진짜 한계를 못 보는 일을 막는다.
+# 서버 컨테이너의 CPU, 메모리 제한은 그대로 둔다(운영 용량을 그대로 재기 위해).
+services:
+  server:
+    environment:
+      # 키가 비면 각 제공자가 경고만 남기고 꺼진다(서버 코드 변경 없음)
+      SEOUL_SUBWAY_REALTIME_API_KEY: ""
+      SEOUL_OPEN_API_KEY: ""
+      PUBLIC_DATA_API_KEY: ""
+      VWORLD_API_KEY: ""
+      VWORLD_PROXY_URL: ""
+      VWORLD_PROXY_SECRET: ""
+      EXPO_ACCESS_TOKEN: ""
+      DATA_ALERT_WEBHOOK_URL: ""
+      # 백그라운드 작업: 열차 위치 폴링과 첫차, 막차 집계, 정산 푸시 스케줄러
+      TRAIN_POSITION_ENABLED: "false"
+      PUSH_SCHEDULER_ENABLED: "false"
+
+  nginx:
+    volumes:
+      # 같은 컨테이너 경로(/etc/nginx/nginx.conf)라 기본 마운트를 이 파일로 바꾼다
+      - ./nginx/nginx.loadtest.conf:/etc/nginx/nginx.conf:ro
