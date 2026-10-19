@@ -194,3 +194,20 @@ sudo docker stats --no-stream
 - 이미지는 태그에 버전이 없어 다이제스트로 고정했다(`docker-compose.yml`과 `osrm/prepare.sh`의 `OSRM_IMAGE`). 다른 버전으로 올릴 때는 **둘을 같이 바꾸고 데이터를 다시 만들어야** 한다(엔진 버전이 다르면 만든 데이터를 읽지 못할 수 있다)
 - OSM 데이터는 ODbL이라 출처 표기가 필요하다(앱에 "© OpenStreetMap contributors" 표기를 넣는 일은 앱 쪽 과제)
 - 서버 사양(ARM, 1코어, 메모리 5.8GiB)에서 `osrm`의 메모리 상한은 2.5GB다. 음성 인식 등 다른 컨테이너와 함께 쓸 때 메모리가 부족하면 `docker stats`로 확인하고 상한을 조정한다
+
+## 10. 열차 위치 mock 서버 (`server-mock`)
+
+지도에 보이는 열차(`GET /api/v1/trains/positions`)는 `server-mock` 컨테이너가 가짜 열차로 답하고, nginx가 이 경로만 그쪽으로 보낸다. 서울시 실시간 API는 키 하나에 하루 1,000회라서 `server` 컨테이너가 그 호출을 시간표가 빠진 곳을 채우는 수집에 쓰기 때문이다.
+
+- 같은 서버 이미지를 `TRAIN_POSITION_SOURCE=MOCK`으로 띄운다. 서울시 키는 주지 않는다.
+- 정산 스케줄러(`PUSH_SCHEDULER_ENABLED=false`)와 음성 작업 처리기(`VALKEY_HOST` 없음)는 꺼 둔다. 서버는 시작할 때 DB에 연결하므로 `DATABASE_URL`은 넘기지만 DB에 쓰지 않는다.
+- 응답의 `source`가 `MOCK`이다. 앱은 이 값으로 "시연용"임을 알려야 한다.
+- 호선과 갱신 간격은 `MOCK_TRAIN_POSITION_LINES`(기본 01~09), `MOCK_TRAIN_POSITION_INTERVAL_SEC`(기본 3초)로 바꾼다. 호선을 하나씩 돌며 갱신하므로 한 호선의 갱신 주기는 호선 수 x 간격이다.
+- nginx는 주소를 요청 때 해석한다. `server-mock`이 내려가 있어도 nginx는 뜨고 열차 위치만 502가 된다.
+
+```bash
+sudo docker compose up -d server-mock
+sudo docker compose exec nginx nginx -s reload
+curl -s "https://sub1s.devnoco.com/api/v1/trains/positions?lineId=03"   # "source":"MOCK"이 나와야 한다
+sudo docker compose stop server-mock                                       # 끄기
+```
