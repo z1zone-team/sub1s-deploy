@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - docker-compose.yml
+      - docker-compose.loadtest.yml
+      - loadtest.sh
       - osrm/**
       - nginx/**
       - setup-swap.sh
@@ -25,7 +27,7 @@ jobs:
           username: ${{ secrets.OCI_SSH_USERNAME }}
           key: ${{ secrets.OCI_SSH_KEY }}
           port: ${{ secrets.OCI_SSH_PORT || 22 }}
-          source: docker-compose.yml,nginx,osrm,setup-swap.sh,fetch-env.sh,init-letsencrypt.sh,init-db.sql
+          source: docker-compose.yml,docker-compose.loadtest.yml,loadtest.sh,nginx,osrm,setup-swap.sh,fetch-env.sh,init-letsencrypt.sh,init-db.sql
           target: ~/sub1s-deploy
 
       - name: Execute deployment on OCI ARM VM
@@ -38,7 +40,7 @@ jobs:
           script: |
             set -e
             cd ~/sub1s-deploy
-            chmod +x setup-swap.sh fetch-env.sh init-letsencrypt.sh osrm/prepare.sh
+            chmod +x setup-swap.sh fetch-env.sh init-letsencrypt.sh loadtest.sh osrm/prepare.sh
 
             # 1. 4GB 스왑 메모리 보장
             ./setup-swap.sh 4G
