@@ -245,6 +245,56 @@ services:
     networks:
       - sub1s-network
 
+  # 8. 열차 위치 mock 서버. 지도에 보이는 열차(/api/v1/trains/positions)만 가짜 열차로 답한다.
+  #    서울시 실시간 API는 키 하나에 하루 1,000회라 server 컨테이너가 시간표를 메우는 수집에 쓰고, 이 컨테이너는 서울시 키를 받지 않는다.
+  #    같은 이미지지만 정산 스케줄러(PUSH_SCHEDULER_ENABLED=false)와 음성 작업 처리기(VALKEY_HOST 없음)는 꺼 둔다.
+  #    서버는 시작할 때 DB에 연결하므로 DATABASE_URL은 필요하다(이 컨테이너는 DB에 쓰지 않는다)
+  server-mock:
+    image: ${SERVER_IMAGE:-ghcr.io/z1zone-team/sub1s-server:latest}
+    container_name: sub1s-server-mock
+    restart: unless-stopped
+    logging: *default-logging
+    command: ["node", "dist/main"]
+    environment:
+      NODE_ENV: production
+      NODE_OPTIONS: "--max-old-space-size=256"
+      PORT: 3000
+      DATABASE_URL: postgresql://sub1s_user:${DB_PASSWORD}@postgres:5432/sub1s_db?schema=public
+      MASTER_3DES_KEY: ${MASTER_3DES_KEY:-${MASTER_ENCRYPTION_KEY}}
+      MASTER_ENCRYPTION_KEY: ${MASTER_ENCRYPTION_KEY:-${MASTER_3DES_KEY}}
+      PUSH_SCHEDULER_ENABLED: "false"
+      TRAIN_POSITION_SOURCE: MOCK
+      TRAIN_POSITION_ENABLED: "true"
+      TRAIN_POSITION_LINES: ${MOCK_TRAIN_POSITION_LINES:-01,02,03,04,05,06,07,08,09}
+      # 가짜 열차는 호출이 없어 짧게 돌려도 된다. 호선을 하나씩 돌며 갱신하므로 호선 수 x 이 값이 한 호선의 갱신 주기다
+      TRAIN_POSITION_INTERVAL_SEC: ${MOCK_TRAIN_POSITION_INTERVAL_SEC:-3}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    expose:
+      - "3000"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.20'
+          memory: 384M
+        reservations:
+          memory: 128M
+    networks:
+      - sub1s-network
+
 networks:
   sub1s-network:
     driver: bridge
