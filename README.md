@@ -113,16 +113,20 @@ docker compose exec server node dist/src/scripts/seed-subway-graph.js
 
 ```bash
 cd ~/sub1s-deploy
-./loadtest.sh status    # 지금 모드 확인(키는 설정 여부만 출력)
-./loadtest.sh on        # 테스트 모드 켜기 (server, nginx만 다시 만든다)
-./loadtest.sh off       # 기본 설정으로 되돌리기
+./loadtest.sh status         # 지금 모드와 자동 복구까지 남은 시간(키는 설정 여부만 출력)
+./loadtest.sh on 90m         # 테스트 모드 켜기. 90분 뒤 자동으로 기본 설정 복구(기본 60m, 0이면 자동 복구 없음)
+./loadtest.sh off            # 기본 설정으로 바로 되돌리기(자동 복구 타이머도 취소)
+./loadtest.sh observe 60m    # 5초마다 CPU, 메모리, 스왑, 부하, DB 연결 수를 TSV로 출력
+# 파일로 받으려면: nohup ./loadtest.sh observe 60m > ~/observe.tsv 2> ~/observe.err &
 # 테스트 동안 CPU를 쓰는 컨테이너를 같이 멈추려면(off가 다시 켠다)
-LOADTEST_STOP="ai server-mock" ./loadtest.sh on
+LOADTEST_STOP="ai server-mock" ./loadtest.sh on 90m
 ```
 
 - 켜면 `docker-compose.loadtest.yml`이 서버의 외부 서비스 키(서울시 실시간, 서울 열린데이터, 공공데이터, V-World, Expo, 데이터 알림)를 비우고 `TRAIN_POSITION_ENABLED`, `PUSH_SCHEDULER_ENABLED`를 끈다. nginx는 `nginx/nginx.loadtest.conf`(속도 제한만 사실상 해제)를 쓴다.
 - **서버 컨테이너의 CPU 0.4코어, 메모리 768MB 제한은 그대로다.** 운영 용량 그대로 재기 위해서다.
-- 이 파일은 `docker-compose.override.yml`이 아니라서 자동으로 읽히지 않는다. 배포 워크플로는 기본 파일만으로 `docker compose up -d`를 하므로 **다음 배포가 돌면 테스트 모드는 꺼진다.** 테스트가 끝나면 `off`로 직접 끈다.
+- **자동 복구**: `on`이 정한 시간 뒤에 `off`를 실행하는 systemd 타이머(`sub1s-loadtest-off`)를 만든다. SSH를 끊어도 동작하고 `off`를 직접 하면 취소된다. 시간 형식은 `90m`, `2h`, `3600s`, 숫자만이면 분이다.
+- 이 파일은 `docker-compose.override.yml`이 아니라서 자동으로 읽히지 않는다. 배포 워크플로는 기본 파일만으로 `docker compose up -d`를 하므로 **다음 배포가 돌아도 테스트 모드는 꺼진다.**
+- `loadtest.sh`와 `docker-compose.loadtest.yml`은 배포 워크플로가 서버로 복사한다(`nginx/`는 원래 복사 대상).
 - `nginx.conf`를 바꾸면 `nginx.loadtest.conf`도 같이 맞춘다.
 - 테스트 모드에서는 열차 위치, 알림, 장소 검색이 동작하지 않는다. 사용자가 앱을 쓰지 않을 때만 켠다.
 
