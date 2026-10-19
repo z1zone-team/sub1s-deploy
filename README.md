@@ -107,6 +107,27 @@ docker compose exec server node dist/src/scripts/seed-subway-graph.js
 
 ---
 
+## 🧪 6.1 부하 테스트 모드
+
+부하 테스트 동안 **외부 API(서울시, 공공데이터, V-World, 푸시) 호출과 한도 소모를 막고** nginx의 IP당 속도 제한(인증 없는 요청 30건/초)을 풀어서 서버의 진짜 한계를 보는 모드다. 서버 코드는 바꾸지 않는다(외부 API 제공자는 키가 비면 경고만 남기고 꺼진다).
+
+```bash
+cd ~/sub1s-deploy
+./loadtest.sh status    # 지금 모드 확인(키는 설정 여부만 출력)
+./loadtest.sh on        # 테스트 모드 켜기 (server, nginx만 다시 만든다)
+./loadtest.sh off       # 기본 설정으로 되돌리기
+# 테스트 동안 CPU를 쓰는 컨테이너를 같이 멈추려면(off가 다시 켠다)
+LOADTEST_STOP="ai server-mock" ./loadtest.sh on
+```
+
+- 켜면 `docker-compose.loadtest.yml`이 서버의 외부 서비스 키(서울시 실시간, 서울 열린데이터, 공공데이터, V-World, Expo, 데이터 알림)를 비우고 `TRAIN_POSITION_ENABLED`, `PUSH_SCHEDULER_ENABLED`를 끈다. nginx는 `nginx/nginx.loadtest.conf`(속도 제한만 사실상 해제)를 쓴다.
+- **서버 컨테이너의 CPU 0.4코어, 메모리 768MB 제한은 그대로다.** 운영 용량 그대로 재기 위해서다.
+- 이 파일은 `docker-compose.override.yml`이 아니라서 자동으로 읽히지 않는다. 배포 워크플로는 기본 파일만으로 `docker compose up -d`를 하므로 **다음 배포가 돌면 테스트 모드는 꺼진다.** 테스트가 끝나면 `off`로 직접 끈다.
+- `nginx.conf`를 바꾸면 `nginx.loadtest.conf`도 같이 맞춘다.
+- 테스트 모드에서는 열차 위치, 알림, 장소 검색이 동작하지 않는다. 사용자가 앱을 쓰지 않을 때만 켠다.
+
+---
+
 ## 🩺 7. 배포 검증 커맨드
 
 ```bash
