@@ -152,7 +152,7 @@ docker stats
 
 앱 PR [#148](https://github.com/z1zone-team/sub1s-app/pull/148)은 초대 링크를 `https://sub1s.devnoco.com/invite/:token`으로 만들고 Android intent filter를 설정한다. 이 저장소는 `https://sub1s.devnoco.com/.well-known/assetlinks.json`에서 해당 앱의 패키지명과 공개 서명 인증서 지문을 제공한다. 앱 설정과 웹 서버 연결 파일이 모두 적용되어야 Android가 도메인을 검증할 수 있다.
 
-현재 등록한 앱은 **개발 빌드 `com.z1zone.sub1s.local`만**이다(사용자 결정). `app-debug.apk`에서 `apksigner verify --print-certs`로 확인한 SHA-256 인증서 지문을 사용한다. 다른 개발 키로 서명한 APK나 스토어용 `com.z1zone.sub1s`는 연결되지 않는다. 스토어용 연결은 실제 배포 서명 인증서가 정해지면 별도 항목을 추가한다. Google Play App Signing 사용 시 배포 앱의 서명 인증서 지문을 사용한다.
+현재 등록한 앱은 **개발 빌드 `com.z1zone.sub1s.local`과 팀 설치용 운영 빌드 `com.z1zone.sub1s`(릴리스 v1.0.1, 디버그 키 서명) 두 개**다. 두 앱은 같은 디버그 키로 서명되어 같은 SHA-256 인증서 지문을 쓴다(운영 앱은 설치된 폰에서 `adb shell pm get-app-links com.z1zone.sub1s`로 확인). 다른 개발 키로 서명한 APK나 스토어용 배포 서명은 연결되지 않는다. 스토어용 연결은 실제 배포 서명 인증서가 정해지면 그 지문을 별도 항목으로 추가한다. Google Play App Signing 사용 시 배포 앱의 서명 인증서 지문을 사용한다.
 
 파일은 `nginx/assetlinks.json`에 있으며 Nginx 컨테이너에 읽기 전용 마운트한다. 기존 OCI 배포 workflow가 `nginx/`를 복사하고 Nginx 컨테이너를 다시 생성하므로 이 파일도 함께 배포된다. 공개 인증서 지문에는 비밀키가 포함되지 않는다. iOS는 이번 작업에서 보류한다.
 
@@ -166,6 +166,7 @@ docker stats
 ```bash
 curl -i https://sub1s.devnoco.com/.well-known/assetlinks.json
 adb shell pm verify-app-links --re-verify com.z1zone.sub1s.local
+# 운영 앱(릴리스 APK)은 패키지명을 com.z1zone.sub1s로 바꿔 같은 명령을 쓴다
 # 검증에 시간이 걸릴 수 있으므로 기다린 뒤 확인한다
 adb shell pm get-app-links com.z1zone.sub1s.local
 # <실제_초대_토큰>을 공유한 링크의 16자리 토큰으로 바꾼다
