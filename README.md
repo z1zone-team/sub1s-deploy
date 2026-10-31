@@ -14,7 +14,7 @@
        │
        ├─► [NestJS 백엔드 :3000] (다익스트라 라우팅, 실시간 소켓 게이트웨이)
        │         │
-       │         ├─► [FastAPI AI :8000] (Whisper STT, Gemini NLU, Edge-TTS)
+       │         ├─► [FastAPI AI :8000] (Whisper STT, Gemini NLU)
        │         │
        │         ├─► [PostgreSQL 16 :5432] (pgvector 확장, 799개 역 노선망)
        │         │
