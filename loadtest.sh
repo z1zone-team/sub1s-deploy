@@ -4,7 +4,7 @@
 #                              시간(90m, 2h, 3600s, 숫자만이면 분)이 지나면 자동으로 off. 기본 60m, 0이면 자동 복구 없음
 #   ./loadtest.sh off          기본 설정으로 되돌린다(자동 복구 타이머도 취소)
 #   ./loadtest.sh status       지금 모드와 자동 복구까지 남은 시간(키 값은 보여 주지 않고 설정 여부만)
-#   ./loadtest.sh observe [시간]  5초마다 CPU, 메모리, 스왑, 부하, DB 연결 수를 TSV로 출력(기본 60m). 파일로 받으려면 nohup과 > 로 리다이렉트
+#   ./loadtest.sh observe [시간]  5초마다 컨테이너 CPU, 메모리, 스왑, 부하, DB 연결 수, 호스트 CPU와 steal을 TSV로 출력(기본 60m). 파일로 받으려면 nohup과 > 로 리다이렉트
 # 선택: LOADTEST_STOP="ai server-mock" ./loadtest.sh on  처럼 테스트 동안 같이 멈출 컨테이너를 지정한다(off가 다시 켠다)
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -79,16 +79,29 @@ case "${1:-status}" in
     dur=$(ttl_seconds "${2:-60m}")
     interval="${INTERVAL:-5}"
     end=$(( $(date +%s) + dur ))
-    printf 'time\tcontainer\tcpu\tmem\tavail_mb\tswap_used_mb\tload1\tpg_conns\n'
+    printf 'time\tcontainer\tcpu\tmem\tavail_mb\tswap_used_mb\tload1\tpg_conns\thost_cpu\thost_steal\n'
+    prev_total=0; prev_idle=0; prev_steal=0
     while [ "$(date +%s)" -lt "$end" ]; do
       ts=$(date +%H:%M:%S)
       avail=$(awk '/MemAvailable/ {printf "%d", $2/1024}' /proc/meminfo)
       swap=$(awk '/SwapTotal/ {t=$2} /SwapFree/ {f=$2} END {printf "%d", (t-f)/1024}' /proc/meminfo)
       load=$(cut -d' ' -f1 /proc/loadavg)
+      # 호스트 전체 CPU 사용률(%)과 steal(%). 직전 기록 이후의 변화량으로 구한다. 첫 기록은 -
+      read -r _ c_user c_nice c_sys c_idle c_iow c_irq c_sirq c_steal _ < /proc/stat
+      c_total=$((c_user + c_nice + c_sys + c_idle + c_iow + c_irq + c_sirq + c_steal))
+      c_idle_all=$((c_idle + c_iow))
+      if [ "$prev_total" -gt 0 ] && [ "$c_total" -gt "$prev_total" ]; then
+        d_total=$((c_total - prev_total))
+        host_cpu=$(awk -v t="$d_total" -v i="$((c_idle_all - prev_idle))" 'BEGIN {printf "%.1f", (t - i) * 100 / t}')
+        host_steal=$(awk -v t="$d_total" -v s="$((c_steal - prev_steal))" 'BEGIN {printf "%.1f", s * 100 / t}')
+      else
+        host_cpu="-"; host_steal="-"
+      fi
+      prev_total=$c_total; prev_idle=$c_idle_all; prev_steal=$c_steal
       conns=$($DC exec -T postgres psql -U sub1s_user -d sub1s_db -At -c "select count(*) from pg_stat_activity" 2>/dev/null || echo "-")
       if [ "$avail" -lt 500 ]; then echo "[경고] $ts 사용 가능한 메모리 ${avail}MB (500MB 미만)" >&2; fi
       sudo docker stats --no-stream --format '{{.Name}}	{{.CPUPerc}}	{{.MemUsage}}' | while IFS=$'\t' read -r name cpu mem; do
-        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$ts" "$name" "$cpu" "$mem" "$avail" "$swap" "$load" "$conns"
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$ts" "$name" "$cpu" "$mem" "$avail" "$swap" "$load" "$conns" "$host_cpu" "$host_steal"
       done
       sleep "$interval"
     done
