@@ -130,7 +130,7 @@ services:
     networks:
       - sub1s-network
 
-  # 4. AI 워커 서비스 (Faster-Whisper int8, Gemini NLU, Edge-TTS) (1024MB 상한 / 512MB 예약)
+  # 4. AI 워커 서비스 (Faster-Whisper int8, Gemini NLU) (1024MB 상한 / 512MB 예약)
   ai:
     image: ${AI_IMAGE:-ghcr.io/z1zone-team/sub1s-ai:latest}
     container_name: sub1s-ai
