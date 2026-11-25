@@ -222,6 +222,7 @@ sudo docker stats --no-stream
 - 이미지는 태그에 버전이 없어 다이제스트로 고정했다(`docker-compose.yml`과 `osrm/prepare.sh`의 `OSRM_IMAGE`). 다른 버전으로 올릴 때는 **둘을 같이 바꾸고 데이터를 다시 만들어야** 한다(엔진 버전이 다르면 만든 데이터를 읽지 못할 수 있다)
 - OSM 데이터는 ODbL이라 출처 표기가 필요하다(앱에 "© OpenStreetMap contributors" 표기를 넣는 일은 앱 쪽 과제)
 - 서버 사양(ARM, 1코어, 메모리 5.8GiB)에서 `osrm`의 메모리 상한은 2.5GB다. 음성 인식 등 다른 컨테이너와 함께 쓸 때 메모리가 부족하면 `docker stats`로 확인하고 상한을 조정한다
+- `osrm`은 스왑을 쓰지 않는다(`memswap_limit`을 메모리 상한과 같게 둠). 2026-11-26에 데이터 약 1.6GB가 스왑으로 밀려 좌표 검색 p95가 905ms까지 느려졌고, 재시작으로 메모리에 다시 올리자 612ms로 돌아왔다(이슈 #44). 스왑 사용량은 `grep VmSwap /proc/$(pgrep -x osrm-routed)/status`로 본다
 
 ## 10. 열차 위치 mock 서버 (`server-mock`)
 

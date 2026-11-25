@@ -246,6 +246,8 @@ services:
           memory: 2560M
         reservations:
           memory: 256M
+    # 스왑을 막는다(메모리 상한과 같게). 데이터가 스왑으로 밀리면 재시작 전까지 좌표 검색이 느려진다(이슈 #44)
+    memswap_limit: 2560M
     networks:
       - sub1s-network
 
