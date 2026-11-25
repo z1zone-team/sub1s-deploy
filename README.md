@@ -99,11 +99,13 @@ docker compose up -d
 # 2. 서비스 상태 점검
 docker compose ps
 
-# 3. 최초 1회 데이터베이스 스키마 생성 및 지하철 그래프 데이터 시딩
-# (server 컨테이너 내부 또는 호스트에서 실행)
-docker compose exec server npx prisma db push
-docker compose exec server node dist/src/scripts/seed-subway-graph.js
+# 3. 최초 1회 데이터베이스 마이그레이션 및 지하철 그래프 데이터 시딩
+# 마이그레이션은 sub1s-server 배포 워크플로가 배포 때마다 적용한다(prisma migrate deploy). 손으로 할 때만 아래 첫 줄을 쓴다
+sudo docker compose run --rm -T server npx prisma migrate deploy
+sudo docker compose exec server node dist/scripts/seed-subway-graph.js
 ```
+
+> `prisma db push`는 쓰지 않는다. 마이그레이션 기록(`_prisma_migrations`)이 남지 않아 이후 배포의 마이그레이션이 꼬인다.
 
 ---
 
@@ -136,13 +138,13 @@ LOADTEST_STOP="ai server-mock" ./loadtest.sh on 90m
 
 ```bash
 # 1. 백엔드 시스템 헬스체크
-curl -sf https://api.sub1s.com/api/health
+curl -sf https://sub1s.devnoco.com/api/health
 
 # 2. AI 워커 헬스체크 (내부 포트 8000)
 docker compose exec ai curl -sf http://localhost:8000/health
 
 # 3. WebSocket 실시간 WSS 핸드셰이크 점검
-curl -sf "https://api.sub1s.com/socket.io/?EIO=4&transport=polling"
+curl -sf "https://sub1s.devnoco.com/socket.io/?EIO=4&transport=polling"
 
 # 4. 실시간 컨테이너 리소스 점검 (메모리 누수 감시)
 docker stats
@@ -237,3 +239,30 @@ sudo docker compose exec nginx nginx -s reload
 curl -s "https://sub1s.devnoco.com/api/v1/trains/positions?lineId=03"   # "source":"MOCK"이 나와야 한다
 sudo docker compose stop server-mock                                       # 끄기
 ```
+
+## 11. 암호화 키 교체
+
+이동 기록의 상세 경로는 마스터 키로 암호화한다(sub1s-docs `SECURITY.md` 0절). 서버는 저장값에 키 ID를 남기고 이전 키로도 풀 수 있다(sub1s-server PR #228). 변수는 OCI 버킷의 `sub1s.env`에 둔다.
+
+| 변수 | 내용 |
+| :--- | :--- |
+| `MASTER_ENCRYPTION_KEY` | 현재 키. 16진수 64자(`openssl rand -hex 32`) 또는 32글자 |
+| `MASTER_ENCRYPTION_KEY_ID` | 현재 키의 ID. 영문, 숫자, `_`, `-` 8자 이하. 비우면 `1` |
+| `MASTER_ENCRYPTION_KEYS_OLD` | 교체 전 키들. `ID:키,ID:키`. 현재 키 ID와 겹치면 서버가 뜨지 않는다 |
+
+교체 순서:
+
+1. 새 키를 만든다: `openssl rand -hex 32`
+2. `sub1s.env`에서 지금 키를 `MASTER_ENCRYPTION_KEYS_OLD=1:<지금 키>`로 옮기고, `MASTER_ENCRYPTION_KEY=<새 키>`, `MASTER_ENCRYPTION_KEY_ID=2`로 바꾼다. 예전 이름 `MASTER_3DES_KEY`가 있으면 지운다(서버는 `MASTER_ENCRYPTION_KEY`를 먼저 읽지만 헷갈리지 않게).
+3. 배포 워크플로를 다시 돌리거나 서버에서 `./fetch-env.sh` 뒤 `sudo docker compose up -d server server-mock`으로 새 값을 반영한다. 이때부터 새 기록은 새 키로 저장되고 예전 기록은 이전 키로 풀린다.
+4. 예전 기록을 새 키로 다시 쓴다. 먼저 세기만 하고, 결과를 본 뒤 `--apply`로 쓴다. 풀리지 않는 행은 ID와 사유만 출력하고 건드리지 않는다.
+
+```bash
+sudo docker compose exec server node dist/scripts/reencrypt-travel-logs.js          # 대상 수만 센다
+sudo docker compose exec server node dist/scripts/reencrypt-travel-logs.js --apply  # 실제로 다시 쓴다
+```
+
+5. 다시 세었을 때 대상이 0이면 `MASTER_ENCRYPTION_KEYS_OLD`에서 이전 키를 빼고 3번처럼 반영한다. 대상이 남아 있는데 이전 키를 빼면 그 기록은 풀 수 없게 된다.
+
+- 키 원문은 버킷 밖(채팅, 이슈, 로그)에 남기지 않는다. 교체 전 키는 다시 쓰기를 마칠 때까지 따로 보관한다.
+- 다시 쓰기 전에 DB 백업을 받아 둔다.
